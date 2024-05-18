@@ -12,79 +12,97 @@ const crypto = require('crypto');
 exports.registration = async (req, res) => {
     const { phone, email } = req.body;
     try {
-        if(!email)  return res.status(422).send({ message: "email required",});
-        else if(!phone)  return res.status(422).send({ message: "phone required",});
+        if (!email) return res.status(422).send({ message: "email required" });
+        else if (!phone) return res.status(422).send({ message: "phone required", });
         req.body.email = email.split(" ").join("").toLowerCase();
-        let user = await User.findOne({
-            $and: [{ $or: [{ email: req.body.email }, { phone: phone }] }],
+
+        // Check if email already exists
+        let userByEmail = await User.findOne({ email: req.body.email });
+        if (userByEmail) {
+            return res.status(409).send({ message: "Email already exists" });
+        }
+
+        // Check if phone number already exists
+        let userByPhone = await User.findOne({ phone: phone });
+        if (userByPhone) {
+            return res.status(409).send({ message: "Phone number already exists" });
+        }
+
+        req.body.userType = "USER";
+        req.body.merchantId = await reffralCode();
+        const userCreate = await User.create(req.body);
+        return res.status(200).send({
+            message: "registered successfully ",
+            data: userCreate,
         });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+exports.login = async (req, res) => {
+    console.log(req.body)
+    const { email } = req.body;
+    try {
+        if (!email) return res.status(422).send({ message: "email required" });
+        const user = await User.findOne({ email });
         if (!user) {
-            // const otp = newOTP.generate(4, {
-            //     alphabets: false,
-            //     upperCase: false,
-            //     specialChar: false,
-            // });
-
-            
-            // const transporter = nodemailer.createTransport({
-            //     host: "smtp.ethereal.email",
-            //     port: 587,
-            //     auth: {
-            //         user: "frieda.smitham40@ethereal.email",
-            //         pass: "TURy68KCpFSsFyNfjs",
-            //     },
-            // });
-            // // Define the email options
-            // const mailOptions = {
-            //     to: email,
-            //     from: "node2@flyweis.technology",
-            //     subject: "Password reset request",
-            //     text:
-            //         `OTP ${otp}\n` +
-            //         `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\n` +
-            //         `your otp is ${otp} ` +
-            //         `for reset password\n\n` +
-            //         `If you did not request this, please ignore this email and your password will remain unchanged.\n`,
-            // };
-            // let resultmail = await transporter.sendMail(mailOptions);
-            // if (resultmail) {
-            // req.body.otp = otp;
-            // req.body.otpExpiration = Date.now() + 3600000;
-
-            req.body.userType = "USER";
-            req.body.merchantId = await reffralCode();
-            const userCreate = await User.create(req.body);
-            return res.status(200).send({
-                message: "registered successfully ",
-                data: userCreate,
-            });
-
-            // } else {
-            //     return res.status(500).json({
-            //         message: "Could not send email. Please try again later.",
-            //     });
-            // }
+            return res.status(400).send({ msg: "not found" });
         } else {
-            return res.status(409).send({ message: "Already Exist", data: [] });
+            const userObj = {};
+            let otp = newOTP.generate(4, {
+                alphabets: false,
+                upperCase: false,
+                specialChar: false,
+            });
+            const transporter = nodemailer.createTransport({
+                service: "gmail",
+                auth: {
+                    user: "shashanksharma1235999@gmail.com",
+                    pass: "sgtmgcbnbjfrewoe",
+                },
+            });
+            // Define the email options
+            const mailOptions = {
+                to: email,
+                from: "node2@flyweis.technology",
+                subject: "Login OTP request",
+                text:
+                    `OTP ${otp}\n` +
+                    `You are receiving this because you (or someone else) have requested the OTP for accessing your account.\n\n` +
+                    `your otp is ${otp} ` +
+                    `for Login \n\n` +
+                    `If you did not request this, please ignore this email and your account will remain same.\n`,
+            };
+            let resultmail = await transporter.sendMail(mailOptions);
+            if (resultmail) {
+                userObj.otp = otp;
+                userObj.accountVerification = false;
+                userObj.otpExpiration = new Date(Date.now() + 5 * 60 * 1000); // OTP expires in 5 minutes
+                const updated = await User.findOneAndUpdate({ email: email }, userObj, { new: true });
+                return res.status(200).send({ msg: "Otp send", userId: updated._id, otp: updated.otp, });
+            }
         }
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: "Server error" });
     }
 };
-
-
-
 exports.verifyOtp = async (req, res) => {
     try {
         const { otp } = req.body;
+        if (!otp) return res.status(422).send({ message: "OTP required" });
         const user = await User.findById(req.params.id);
         if (!user) {
-            return res.status(404).send({ message: "user not found" });
+            return res.status(404).send({ message: "User not found" });
         }
-        if (user.otp !== otp || user.otpExpiration < Date.now()) {
+        if (user.otpExpiration < Date.now()) {
+            return res.status(400).json({ message: "OTP Expired" });
+        } else if (user.otp !== otp) {
             return res.status(400).json({ message: "Invalid OTP" });
         }
+
         const updated = await User.findByIdAndUpdate(
             { _id: user._id },
             { accountVerification: true },
@@ -121,53 +139,7 @@ exports.update = async (req, res) => {
         return res.status(500).json({ error: 'Internal server error' });
     }
 };
-exports.login = async (req, res) => {
-    const { email } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(400).send({ msg: "not found" });
-        } else {
-            const userObj = {};
-            let otp = newOTP.generate(4, {
-                alphabets: false,
-                upperCase: false,
-                specialChar: false,
-            });
-            const transporter = nodemailer.createTransport({
-                host: "smtp.ethereal.email",
-                port: 587,
-                auth: {
-                    user: "frieda.smitham40@ethereal.email",
-                    pass: "TURy68KCpFSsFyNfjs",
-                },
-            });
-            // Define the email options
-            const mailOptions = {
-                to: email,
-                from: "node2@flyweis.technology",
-                subject: "Password reset request",
-                text:
-                    `OTP ${otp}\n` +
-                    `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\n` +
-                    `your otp is ${otp} ` +
-                    `for reset password\n\n` +
-                    `If you did not request this, please ignore this email and your password will remain unchanged.\n`,
-            };
-            let resultmail = await transporter.sendMail(mailOptions);
-            if (resultmail) {
-                userObj.otp = otp;
-                userObj.accountVerification = false;
-                userObj.otpExpiration = new Date(Date.now() + 5 * 60 * 1000); // OTP expires in 5 minutes
-                const updated = await User.findOneAndUpdate({ email: email }, userObj, { new: true });
-                return res.status(200).send({ msg: "Otp send", userId: updated._id, otp: updated.otp, });
-            }
-        }
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: "Server error" });
-    }
-};
+
 exports.resendOTP = async (req, res) => {
     const { id } = req.params;
     try {
